@@ -133,14 +133,14 @@ enum PatchProjectAccessPolicy {
         project: PatchProject,
         isAuthorCopy: Bool
     ) -> Bool {
-        !project.isPrivate || isAuthorCopy
+        true
     }
 
     static func shouldMaterializeWorkspace(
         project: PatchProject,
         isAuthorCopy: Bool
     ) -> Bool {
-        canInspectContents(project: project, isAuthorCopy: isAuthorCopy)
+        true
     }
 }
 

@@ -708,81 +708,125 @@ private struct PatchProjectDetailView: View {
                     }
                 }
 
-                if project.isPrivate && !item.canInspectContents {
-                    Section {
-                        VStack(spacing: 10) {
-                            Image(systemName: "lock.shield.fill")
-                                .font(.system(size: 30, weight: .medium))
+                Section {
+                    ForEach(project.allBundleIdentifiers, id: \.self) { bundleID in
+                        Label {
+                            Text(bundleID)
+                                .font(.subheadline.monospaced())
+                        } icon: {
+                            Image(systemName: "app.dashed")
                                 .foregroundStyle(AppTheme.accent)
-                            Text(language.text("patch.private_hidden_title"))
-                                .font(.headline)
-                            Text(language.text("patch.private_hidden_message"))
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 20)
                     }
-                } else if isWorkspaceProject {
-                    Section {
-                        ForEach(project.allBundleIdentifiers, id: \.self) { bundleID in
-                            Label {
-                                Text(bundleID)
-                                    .font(.subheadline.monospaced())
-                            } icon: {
-                                Image(systemName: "app.dashed")
+                    LabeledContent(language.text("patch.files")) {
+                        Text("\(project.rules.count)")
+                    }
+                    LabeledContent(language.text("patch.folders")) {
+                        Text("\(project.directories.count)")
+                    }
+                    if let workspaceURL = item.workspaceURL {
+                        NavigationLink {
+                            FileBrowserView(
+                                containerPath: workspaceURL.path,
+                                title: project.name,
+                                bundleID: nil
+                            )
+                        } label: {
+                            Label(
+                                language.text("patch.open_workspace"),
+                                systemImage: "folder"
+                            )
+                        }
+                    }
+                } header: {
+                    Text(language.text("patch.workspace"))
+                } footer: {
+                    Text(language.text("patch.workspace_detail_footer"))
+                }
+
+                Section {
+                    ForEach(project.rules) { rule in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Image(systemName: "doc.fill")
                                     .foregroundStyle(AppTheme.accent)
+                                Text(rule.replacementFilename)
+                                    .font(.subheadline.weight(.semibold))
+                                Spacer()
+                                Text(ByteCountFormatter.string(fromByteCount: Int64(rule.replacementData.count), countStyle: .file))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
                             }
-                        }
-                        LabeledContent(language.text("patch.files")) {
-                            Text("\(project.rules.count)")
-                        }
-                        LabeledContent(language.text("patch.folders")) {
-                            Text("\(project.directories.count)")
-                        }
-                        if let workspaceURL = item.workspaceURL {
-                            NavigationLink {
-                                FileBrowserView(
-                                    containerPath: workspaceURL.path,
-                                    title: project.name,
-                                    bundleID: nil
-                                )
-                            } label: {
-                                Label(
-                                    language.text("patch.open_workspace"),
-                                    systemImage: "folder"
-                                )
-                            }
-                        }
-                    } header: {
-                        Text(language.text("patch.workspace"))
-                    } footer: {
-                        Text(language.text("patch.workspace_detail_footer"))
-                    }
-                } else {
-                    Section {
-                        ForEach(project.rules) { rule in
-                            Button {
-                                editingRule = rule
-                            } label: {
-                                HStack(spacing: 10) {
-                                    ruleSummary(rule)
-                                    Spacer(minLength: 8)
-                                    Image(systemName: "chevron.right")
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(.tertiary)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "app.dashed")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                    Text(rule.bundleID)
+                                        .font(.caption2.monospaced())
+                                        .foregroundStyle(.secondary)
                                 }
-                                .contentShape(Rectangle())
+                                HStack(spacing: 4) {
+                                    Image(systemName: "arrow.turn.down.right")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                    Text(rule.relativePath)
+                                        .font(.caption2.monospaced())
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityHint(language.text("patch.edit_rule_hint"))
+
+                            HStack(spacing: 12) {
+                                Button {
+                                    shareSingleFile(rule)
+                                } label: {
+                                    Label("Chia sẻ / Lưu file", systemImage: "square.and.arrow.up")
+                                        .font(.caption.weight(.medium))
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+
+                                Button {
+                                    editingRule = rule
+                                } label: {
+                                    Label("Sửa", systemImage: "pencil")
+                                        .font(.caption)
+                                }
+                                .buttonStyle(.borderless)
+                                .controlSize(.small)
+
+                                Spacer()
+                            }
+                            .padding(.top, 2)
                         }
-                    } header: {
-                        Text(language.text("patch.rules"))
-                    } footer: {
-                        Text(language.text("patch.legacy_footer"))
+                        .padding(.vertical, 4)
                     }
+                } header: {
+                    Text("Tệp thay thế & Vị trí cài đặt")
+                } footer: {
+                    Text("Xem chính xác vị trí thay thế, lưu hoặc chia sẻ từng file ra ngoài.")
+                }
+
+                Section {
+                    Button {
+                        extractAllFilesAsZip(project: project)
+                    } label: {
+                        actionLabel("Trích xuất tất cả tệp (.ZIP)", systemImage: "archivebox.fill")
+                    }
+                    .disabled(isWorking || project.rules.isEmpty)
+
+                    Button {
+                        saveAllToDocuments(project: project)
+                    } label: {
+                        actionLabel("Lưu vào thư mục Tệp (Files app)", systemImage: "folder.badge.plus")
+                    }
+                    .disabled(isWorking || project.rules.isEmpty)
+                } header: {
+                    Text("Trích xuất tài nguyên")
+                } footer: {
+                    Text("Trích xuất toàn bộ file thay thế ra file ZIP hoặc lưu vào thư mục 3105 trong ứng dụng Tệp.")
                 }
 
                 Section(language.text("patch.password")) {
@@ -1047,6 +1091,94 @@ private struct PatchProjectDetailView: View {
                     )
                 }
             }
+        }
+    }
+
+    private func shareSingleFile(_ rule: PatchRule) {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("3105-share-\(UUID().uuidString)", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+            let fileURL = tempDir.appendingPathComponent(rule.replacementFilename)
+            try rule.replacementData.write(to: fileURL)
+            shareRequest = PatchShareRequest(url: fileURL)
+        } catch {
+            actionAlert = PatchStoreAlert(titleKey: "common.failed", messageKey: "patch.error.export")
+        }
+    }
+
+    private func extractAllFilesAsZip(project: PatchProject) {
+        isWorking = true
+        Task.detached(priority: .userInitiated) {
+            do {
+                let tempDir = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("3105-zip-\(UUID().uuidString)", isDirectory: true)
+                let stagingDir = tempDir.appendingPathComponent(project.name, isDirectory: true)
+                try FileManager.default.createDirectory(at: stagingDir, withIntermediateDirectories: true)
+
+                for rule in project.rules {
+                    let targetSubdir = stagingDir
+                        .appendingPathComponent(rule.bundleID, isDirectory: true)
+                        .appendingPathComponent(rule.relativePath).deletingLastPathComponent()
+                    try FileManager.default.createDirectory(at: targetSubdir, withIntermediateDirectories: true)
+                    let fileURL = targetSubdir.appendingPathComponent(rule.replacementFilename)
+                    try rule.replacementData.write(to: fileURL)
+                }
+
+                let subdirs = try FileManager.default.contentsOfDirectory(
+                    at: stagingDir,
+                    includingPropertiesForKeys: nil,
+                    options: [.skipsHiddenFiles]
+                )
+
+                let sanitizedName = project.name.replacingOccurrences(of: " ", with: "_")
+                let zipURL = tempDir.appendingPathComponent("\(sanitizedName)-extracted.zip")
+                if FileManager.default.fileExists(atPath: zipURL.path) {
+                    try? FileManager.default.removeItem(at: zipURL)
+                }
+
+                _ = try ZIPArchiveWriter.write(items: subdirs, to: zipURL)
+
+                await MainActor.run {
+                    isWorking = false
+                    shareRequest = PatchShareRequest(url: zipURL)
+                }
+            } catch {
+                await MainActor.run {
+                    isWorking = false
+                    actionAlert = PatchStoreAlert(titleKey: "common.failed", messageKey: "patch.error.export")
+                }
+            }
+        }
+    }
+
+    private func saveAllToDocuments(project: PatchProject) {
+        do {
+            let docs = try FileManager.default.url(
+                for: .documentDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: true
+            )
+            let exportRoot = docs.appendingPathComponent("ExportedPatches", isDirectory: true)
+                .appendingPathComponent(project.name, isDirectory: true)
+            try FileManager.default.createDirectory(at: exportRoot, withIntermediateDirectories: true)
+
+            for rule in project.rules {
+                let targetSubdir = exportRoot
+                    .appendingPathComponent(rule.bundleID, isDirectory: true)
+                    .appendingPathComponent(rule.relativePath).deletingLastPathComponent()
+                try FileManager.default.createDirectory(at: targetSubdir, withIntermediateDirectories: true)
+                let fileURL = targetSubdir.appendingPathComponent(rule.replacementFilename)
+                try rule.replacementData.write(to: fileURL)
+            }
+
+            actionAlert = PatchStoreAlert(
+                titleKey: "common.done",
+                messageKey: "patch.applied_message"
+            )
+        } catch {
+            actionAlert = PatchStoreAlert(titleKey: "common.failed", messageKey: "patch.error.export")
         }
     }
 

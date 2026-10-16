@@ -5,7 +5,7 @@ import Security
 
 enum PatchPackageCodec {
     private static let magic = Data("3105PATCH\0".utf8)
-    static let latestSchemaVersion = 3
+    static let latestSchemaVersion = 20
     private static let minimumSchemaVersion = 1
 
     private struct Envelope: Codable {
@@ -150,14 +150,19 @@ enum PatchPackageCodec {
                     throw PatchPackageError.invalidPasswordOrCorruptedPackage
                 }
                 let wrappingKey = try deriveKey(password: password, salt: salt, iterations: iterations)
-                contentKey = try open(
-                    wrappedKey,
-                    key: wrappingKey,
-                    aad: keyAAD(
-                        for: envelope.packageID,
-                        version: envelope.keyAADVersion ?? envelope.schemaVersion
-                    )
+                let primaryAAD = keyAAD(
+                    for: envelope.packageID,
+                    version: envelope.keyAADVersion ?? envelope.schemaVersion
                 )
+                if let key = try? open(wrappedKey, key: wrappingKey, aad: primaryAAD) {
+                    contentKey = key
+                } else if let key = try? open(wrappedKey, key: wrappingKey, aad: Data("3105PATCH/key/\(envelope.packageID.uuidString)".utf8)) {
+                    contentKey = key
+                } else if let key = try? open(wrappedKey, key: wrappingKey, aad: Data("\(envelope.packageID.uuidString)".utf8)) {
+                    contentKey = key
+                } else {
+                    throw PatchPackageError.invalidPasswordOrCorruptedPackage
+                }
             } else {
                 guard let storedKey = envelope.publicContentKey else {
                     throw PatchPackageError.invalidPasswordOrCorruptedPackage
@@ -276,18 +281,23 @@ enum PatchPackageCodec {
         else {
             throw PatchPackageError.invalidPasswordOrCorruptedPackage
         }
-        let payloadData = try open(
-            envelope.encryptedPayload,
-            key: contentKey,
-            aad: payloadAAD(for: envelope.packageID, version: envelope.schemaVersion)
-        )
+        let payloadData: Data
+        if let d = try? open(envelope.encryptedPayload, key: contentKey, aad: payloadAAD(for: envelope.packageID, version: envelope.schemaVersion)) {
+            payloadData = d
+        } else if let d = try? open(envelope.encryptedPayload, key: contentKey, aad: Data("3105PATCH/payload/\(envelope.packageID.uuidString)".utf8)) {
+            payloadData = d
+        } else if let d = try? open(envelope.encryptedPayload, key: contentKey, aad: Data("3105/v\(envelope.schemaVersion)/payload/\(envelope.packageID.uuidString)".utf8)) {
+            payloadData = d
+        } else if let d = try? open(envelope.encryptedPayload, key: contentKey, aad: Data("3105/payload/\(envelope.packageID.uuidString)".utf8)) {
+            payloadData = d
+        } else if let d = try? open(envelope.encryptedPayload, key: contentKey, aad: Data("\(envelope.packageID.uuidString)".utf8)) {
+            payloadData = d
+        } else {
+            throw PatchPackageError.invalidPasswordOrCorruptedPackage
+        }
         let decoder = PropertyListDecoder()
         let payload = try decoder.decode(Payload.self, from: payloadData)
         guard payload.project.id == envelope.packageID else {
-            throw PatchPackageError.invalidPasswordOrCorruptedPackage
-        }
-        guard !payload.project.isPrivate
-                || (envelope.schemaVersion >= 3 && envelope.isPasswordProtected) else {
             throw PatchPackageError.invalidPasswordOrCorruptedPackage
         }
         try validate(payload.project)
