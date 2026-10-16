@@ -245,9 +245,8 @@ public final class AirLiftPairingController: ObservableObject {
                 dict[keyStr] = d
             }
         }
-        if let data = NetService.data(fromTXTRecord: dict) {
-            service.setTXTRecord(data)
-        }
+        let data = NetService.data(fromTXTRecord: dict)
+        service.setTXTRecord(data)
         service.publish()
         self.netService = service
     }
