@@ -1,0 +1,180 @@
+name: Build 3105 Beta IPA (Unsigned)
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: 'App Version Name'
+        required: false
+        default: '2.1.0-beta2'
+        type: string
+      build_configuration:
+        description: 'Build Configuration'
+        required: true
+        default: 'Release'
+        type: choice
+        options:
+          - Release
+          - Debug
+      create_github_release:
+        description: 'Create/Publish GitHub Release'
+        required: false
+        default: true
+        type: boolean
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-unsigned-ipa:
+    name: Build & Package 3105 IPA
+    runs-on: macos-14
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Select Xcode
+        run: |
+          echo "Available Xcode installations:"
+          ls -d /Applications/Xcode* || true
+          LATEST_XCODE=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -n 1)
+          if [ -n "$LATEST_XCODE" ]; then
+            echo "Selecting latest Xcode: $LATEST_XCODE"
+            sudo xcode-select -s "$LATEST_XCODE"
+          fi
+          xcodebuild -version
+
+      - name: Build Rust Airlift Core
+        run: |
+          echo "=== Setting up Rust Toolchain for iOS ==="
+          rustup default stable
+          rustup target add aarch64-apple-ios
+          echo "=== Compiling Rust Airlift Core (with 3105 Authentic Grappa Fallback) ==="
+          if [ -d "rust-core" ]; then
+            cd rust-core
+            if cargo build --release --target aarch64-apple-ios; then
+              echo "=== Updating AirliftFFI.xcframework with freshly compiled staticlib ==="
+              cp target/aarch64-apple-ios/release/libairlift_ffi.a ../AirliftFFI.xcframework/ios-arm64/libairlift_ffi.a
+            else
+              echo "⚠️ Cargo build failed, fallback to prebuilt staticlib"
+            fi
+            cd ..
+          fi
+          ls -lh AirliftFFI.xcframework/ios-arm64/libairlift_ffi.a
+
+      - name: Build Archive (Unsigned)
+        run: |
+          CONFIG="${{ github.event.inputs.build_configuration || 'Release' }}"
+          mkdir -p build
+          
+          set -o pipefail
+          xcodebuild archive \
+            -project ThreeOneOSFive.xcodeproj \
+            -scheme 3105 \
+            -configuration "$CONFIG" \
+            -destination "generic/platform=iOS" \
+            -archivePath build/ThreeOneOSFive.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES \
+            DEVELOPMENT_TEAM="" \
+            ENABLE_USER_SCRIPT_SANDBOXING=NO \
+            -allowProvisioningUpdates=NO \
+            SWIFT_COMPILATION_MODE=wholemodule \
+            SWIFT_OPTIMIZATION_LEVEL="-O" \
+            LLVM_LTO=thin \
+            DEPLOYMENT_POSTPROCESSING=YES \
+            STRIP_INSTALLED_PRODUCT=YES \
+            STRIP_STYLE=all \
+            DEAD_CODE_STRIPPING=YES \
+            COPY_PHASE_STRIP=YES \
+            COMPILER_INDEX_STORE_ENABLE=NO 2>&1 | tee build/xcodebuild.log || {
+              echo "❌ BUILD FAILED! Extracting Clang/Xcode error logs:"
+              grep -E "error:|fatal error:|fail" build/xcodebuild.log || cat build/xcodebuild.log | tail -n 100
+              exit 1
+            }
+
+      - name: Package Unsigned IPA
+        run: |
+          VERSION="${{ github.event.inputs.version_name || '2.1.0-beta2' }}"
+          IPA_NAME="3105-v${VERSION}-unsigned.ipa"
+          
+          echo "Creating IPA structure from archive..."
+          mkdir -p build/Payload
+          cp -R build/ThreeOneOSFive.xcarchive/Products/Applications/*.app build/Payload/
+          
+          APP_DIR=$(ls -d build/Payload/*.app | head -n 1)
+          APP_NAME=$(basename "$APP_DIR" .app)
+          BIN_PATH="${APP_DIR}/${APP_NAME}"
+          
+          echo "=== 🛡️ BINARY HARDENING & SYMBOL STRIPPING ==="
+          if [ -f "$BIN_PATH" ]; then
+            echo "Binary size before strip: $(ls -lh "$BIN_PATH")"
+            strip -x -S "$BIN_PATH" || strip -x "$BIN_PATH" || true
+            echo "Binary size after strip: $(ls -lh "$BIN_PATH")"
+          fi
+          
+          echo "=== 🧹 CLEANING LEAKED METADATA & COMPILER ARTIFACTS ==="
+          find "$APP_DIR" -name "*.dSYM" -exec rm -rf {} + 2>/dev/null || true
+          find "$APP_DIR" -name "*.swiftmodule" -exec rm -rf {} + 2>/dev/null || true
+          find "$APP_DIR" -name "*.swiftdoc" -exec rm -rf {} + 2>/dev/null || true
+          find "$APP_DIR" -name "*.swiftinterface" -exec rm -rf {} + 2>/dev/null || true
+          find "$APP_DIR" -name "*.abi.json" -exec rm -rf {} + 2>/dev/null || true
+          find "$APP_DIR" -name "*.DS_Store" -exec rm -rf {} + 2>/dev/null || true
+          
+          cd build
+          zip -r9 "$IPA_NAME" Payload
+          shasum -a 256 "$IPA_NAME" > "${IPA_NAME}.sha256"
+          
+          echo "IPA Size: $(du -sh "$IPA_NAME" | cut -f1)"
+          echo "SHA256: $(cat "${IPA_NAME}.sha256")"
+          
+          echo "IPA_PATH=build/${IPA_NAME}" >> $GITHUB_ENV
+          echo "IPA_NAME=${IPA_NAME}" >> $GITHUB_ENV
+          echo "SHA256_PATH=build/${IPA_NAME}.sha256" >> $GITHUB_ENV
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+
+      - name: Upload Unsigned IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.IPA_NAME }}
+          path: |
+            ${{ env.IPA_PATH }}
+            ${{ env.SHA256_PATH }}
+          retention-days: 30
+
+      - name: Create / Update GitHub Release
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}-{1}', env.VERSION, github.run_number) }}
+          name: ${{ format('3105 v{0}', env.VERSION) }}
+          body: |
+            ## 🚀 3105 Offline v2 (2.1 Beta 2)
+            
+            ### 📦 Build Info
+            - **Target:** iOS 16.0+
+            - **Package:** `${{ env.IPA_NAME }}`
+            - **Commit:** `${{ github.sha }}`
+            
+            ### 🔑 Installation Methods
+            1. **TrollStore:** Open the `.ipa` directly in TrollStore.
+            2. **AltStore / SideStore / Sideloadly / Esign / GBox / Scarlet**
+          files: |
+            ${{ env.IPA_PATH }}
+            ${{ env.SHA256_PATH }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
