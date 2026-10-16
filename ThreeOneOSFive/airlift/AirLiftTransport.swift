@@ -74,17 +74,19 @@ public enum AirLiftTransport {
     }
 
     private static func readOneLocked(path: String, pairingPath: String) throws -> Data {
-        var error: NSError?
-        guard let data = ATCGlue.readFileArbitrary(
-            withDeviceIP: defaultDeviceIP,
-            pairingPath: pairingPath,
-            absolutePath: path,
-            maximumBytes: 100 * 1024 * 1024,
-            error: &error
-        ) else {
-            throw AirLiftTransportError.fileNotFound(error?.localizedDescription ?? path)
+        do {
+            guard let data = try ATCGlue.readFileArbitrary(
+                withDeviceIP: defaultDeviceIP,
+                pairingPath: pairingPath,
+                absolutePath: path,
+                maximumBytes: 100 * 1024 * 1024
+            ) else {
+                throw AirLiftTransportError.fileNotFound(path)
+            }
+            return data
+        } catch {
+            throw AirLiftTransportError.fileNotFound(error.localizedDescription)
         }
-        return data
     }
 
     /// Lists entries in a given file reference location
@@ -96,23 +98,25 @@ public enum AirLiftTransport {
             throw AirLiftTransportError.tunnelFailed("No pairing file available")
         }
 
-        var error: NSError?
-        guard let items = ATCGlue.listDirectoryArbitrary(
-            withDeviceIP: defaultDeviceIP,
-            pairingPath: pairingPath,
-            absolutePath: reference.path,
-            error: &error
-        ) else {
-            throw AirLiftTransportError.afcError(error?.localizedDescription ?? "Failed to list directory")
-        }
+        do {
+            guard let items = try ATCGlue.listDirectoryArbitrary(
+                withDeviceIP: defaultDeviceIP,
+                pairingPath: pairingPath,
+                absolutePath: reference.path
+            ) else {
+                throw AirLiftTransportError.afcError("Failed to list directory")
+            }
 
-        return items.map { name in
-            AirLiftDirectoryEntry(
-                name: name,
-                relativePath: (reference.path as NSString).appendingPathComponent(name),
-                isDirectory: false,
-                size: 0
-            )
+            return items.map { name in
+                AirLiftDirectoryEntry(
+                    name: name,
+                    relativePath: (reference.path as NSString).appendingPathComponent(name),
+                    isDirectory: false,
+                    size: 0
+                )
+            }
+        } catch {
+            throw AirLiftTransportError.afcError(error.localizedDescription)
         }
     }
 
@@ -125,17 +129,20 @@ public enum AirLiftTransport {
             throw AirLiftTransportError.tunnelFailed("No pairing file available")
         }
 
-        var error: NSError?
-        guard let dict = ATCGlue.application(withBundleID: bundleID, deviceIP: defaultDeviceIP, pairingPath: pairingPath, error: &error) else {
-            throw AirLiftTransportError.fileNotFound("App with bundle ID \(bundleID) not found")
-        }
+        do {
+            guard let dict = try ATCGlue.application(withBundleID: bundleID, deviceIP: defaultDeviceIP, pairingPath: pairingPath) else {
+                throw AirLiftTransportError.fileNotFound("App with bundle ID \(bundleID) not found")
+            }
 
-        return AirLiftApplicationRecord(
-            bundleID: bundleID,
-            bundlePath: dict["Path"] as? String ?? "",
-            dataContainerPath: dict["Container"] as? String,
-            displayName: dict["CFBundleDisplayName"] as? String ?? dict["CFBundleName"] as? String
-        )
+            return AirLiftApplicationRecord(
+                bundleID: bundleID,
+                bundlePath: dict["Path"] as? String ?? "",
+                dataContainerPath: dict["Container"] as? String,
+                displayName: dict["CFBundleDisplayName"] as? String ?? dict["CFBundleName"] as? String
+            )
+        } catch {
+            throw AirLiftTransportError.fileNotFound(error.localizedDescription)
+        }
     }
 
     /// Injects or writes files directly outside sandbox using Books staging & AirTraffic exploit
@@ -152,18 +159,16 @@ public enum AirLiftTransport {
             throw AirLiftTransportError.tunnelFailed("Pairing file required for AirLift write")
         }
 
-        var error: NSError?
-        let success = ATCGlue.writeFilesArbitrary(
-            withDeviceIP: defaultDeviceIP,
-            pairingPath: pairingPath,
-            targetDirectories: targetDirectories,
-            fileNames: fileNames,
-            data: datas,
-            error: &error
-        )
-
-        if !success {
-            throw AirLiftTransportError.writeFailed(error?.localizedDescription ?? "Unknown write error")
+        do {
+            try ATCGlue.writeFilesArbitrary(
+                withDeviceIP: defaultDeviceIP,
+                pairingPath: pairingPath,
+                targetDirectories: targetDirectories,
+                fileNames: fileNames,
+                data: datas
+            )
+        } catch {
+            throw AirLiftTransportError.writeFailed(error.localizedDescription)
         }
     }
 }
