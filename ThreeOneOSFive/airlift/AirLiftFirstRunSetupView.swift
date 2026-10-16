@@ -5,6 +5,8 @@
 //
 
 import SwiftUI
+import Network
+import UniformTypeIdentifiers
 
 public enum AirLiftFirstRunStep: Int, CaseIterable {
     case wifiAndVPN = 1
@@ -14,6 +16,8 @@ public enum AirLiftFirstRunStep: Int, CaseIterable {
 }
 
 public struct AirLiftFirstRunSetupView: View {
+    @Environment(\.dismiss) private var dismiss
+
     // Official App Store link embedded in the binary
     private static let localDevVPNURL = URL(string: "https://apps.apple.com/us/app/localdevvpn/id6755608044?l=vi")!
 
@@ -23,9 +27,12 @@ public struct AirLiftFirstRunSetupView: View {
     @State private var isTestingConnection: Bool = false
     @State private var testResultSuccess: Bool = false
     @State private var errorMessage: String? = nil
+    @State private var isImportingPairing: Bool = false
+
+    public init() {}
 
     public var body: some View {
-        NavigationView {
+        NavigationStack {
             VStack(spacing: 20) {
                 // Header Step Indicator
                 HStack {
@@ -74,10 +81,11 @@ public struct AirLiftFirstRunSetupView: View {
                             }
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(currentStep == .pairing && pairingController.pairingStatus != "paired")
+                        .disabled(currentStep == .pairing && !AirLiftPairingStore.shared.hasRecord)
                     } else {
                         Button("Hoàn tất") {
-                            // Finish and dismiss onboarding
+                            UserDefaults.standard.set(true, forKey: "3105.airlift.first_run_completed")
+                            dismiss()
                         }
                         .buttonStyle(.borderedProminent)
                     }
@@ -85,6 +93,21 @@ public struct AirLiftFirstRunSetupView: View {
                 .padding()
             }
             .navigationTitle("Thiết lập AirLift")
+            .navigationBarTitleDisplayMode(.inline)
+            .fileImporter(
+                isPresented: $isImportingPairing,
+                allowedContentTypes: [.item],
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    if let url = urls.first {
+                        _ = pairingController.importPairingFile(from: url)
+                    }
+                case .failure(let err):
+                    errorMessage = err.localizedDescription
+                }
+            }
         }
     }
 
@@ -140,6 +163,10 @@ public struct AirLiftFirstRunSetupView: View {
                     Text(pin)
                         .font(.system(size: 36, weight: .bold, design: .monospaced))
                         .foregroundColor(.blue)
+                    Text("Mở Cài đặt › Quyền riêng tư & Bảo mật › Chế độ Nhà phát triển › Ghép đôi mạng để nhập mã PIN này.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity)
                 .padding()
@@ -147,18 +174,51 @@ public struct AirLiftFirstRunSetupView: View {
                 .cornerRadius(12)
             }
 
-            Button(action: {
-                // start pairing
-            }) {
-                HStack {
-                    Image(systemName: "iphone.badge.play")
-                    Text("Pair trực tiếp trên iPhone")
+            if pairingController.isRunning {
+                VStack(spacing: 12) {
+                    HStack {
+                        ProgressView()
+                            .padding(.trailing, 6)
+                        Text(pairingController.pairingStatus)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color(UIColor.secondarySystemBackground))
+                    .cornerRadius(12)
+
+                    Button("Huỷ pairing") {
+                        pairingController.cancelPairing()
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.red)
                 }
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(Color.green)
-                .foregroundColor(.white)
-                .cornerRadius(12)
+            } else {
+                Button(action: {
+                    pairingController.startOnDevicePairing()
+                }) {
+                    HStack {
+                        Image(systemName: "iphone.badge.play")
+                        Text(AirLiftPairingStore.shared.hasRecord ? "Ghép đôi lại trên iPhone" : "Pair trực tiếp trên iPhone")
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.green)
+                    .foregroundColor(.white)
+                    .cornerRadius(12)
+                }
+            }
+
+            if AirLiftPairingStore.shared.hasRecord {
+                HStack {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                    Text("Đã có pairing record hoạt động.")
+                        .font(.subheadline)
+                        .foregroundColor(.green)
+                }
+                .padding(.top, 4)
             }
 
             Text("Hoặc:")
@@ -166,7 +226,7 @@ public struct AirLiftFirstRunSetupView: View {
                 .foregroundColor(.secondary)
 
             Button("Nhập file pairing từ máy tính (.plist)") {
-                // import document picker
+                isImportingPairing = true
             }
             .buttonStyle(.bordered)
         }
@@ -177,13 +237,49 @@ public struct AirLiftFirstRunSetupView: View {
             Label("Kiểm tra kết nối", systemImage: "checkmark.shield")
                 .font(.title2.bold())
 
-            Text("3105 sẽ thăm dò dịch vụ RSD (port 49152), ATC và streaming_zip.")
+            Text("3105 sẽ thăm dò dịch vụ RSD (port 49152), ATC và streaming_zip qua dải IP 10.7.0.1.")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
 
+            if testResultSuccess {
+                HStack {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                    Text("Kết nối RSD và dịch vụ AirLift thành công!")
+                        .font(.subheadline)
+                        .foregroundColor(.green)
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.green.opacity(0.12))
+                .cornerRadius(10)
+            } else if let err = errorMessage {
+                HStack {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.red)
+                    Text(err)
+                        .font(.subheadline)
+                        .foregroundColor(.red)
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.red.opacity(0.12))
+                .cornerRadius(10)
+            }
+
             Button(action: {
                 isTestingConnection = true
-                // Run diagnostic probe
+                errorMessage = nil
+                Task {
+                    let success = await testTunnelConnection()
+                    await MainActor.run {
+                        isTestingConnection = false
+                        testResultSuccess = success
+                        if !success {
+                            errorMessage = "Không thể kết nối cổng RSD 49152. Hãy đảm bảo LocalDevVPN đang BẬT và iPhone đang có Wi-Fi."
+                        }
+                    }
+                }
             }) {
                 HStack {
                     if isTestingConnection {
@@ -198,6 +294,7 @@ public struct AirLiftFirstRunSetupView: View {
                 .foregroundColor(.white)
                 .cornerRadius(12)
             }
+            .disabled(isTestingConnection)
         }
     }
 
@@ -217,5 +314,36 @@ public struct AirLiftFirstRunSetupView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 40)
+    }
+
+    private func testTunnelConnection() async -> Bool {
+        return await withCheckedContinuation { continuation in
+            let endpoint = NWEndpoint.hostPort(host: "10.7.0.1", port: 49152)
+            let connection = NWConnection(to: endpoint, using: .tcp)
+            var resumed = false
+            connection.stateUpdateHandler = { state in
+                guard !resumed else { return }
+                switch state {
+                case .ready:
+                    resumed = true
+                    connection.cancel()
+                    continuation.resume(returning: true)
+                case .failed, .cancelled:
+                    resumed = true
+                    connection.cancel()
+                    continuation.resume(returning: false)
+                default:
+                    break
+                }
+            }
+            connection.start(queue: .global())
+            DispatchQueue.global().asyncAfter(deadline: .now() + 3.0) {
+                if !resumed {
+                    resumed = true
+                    connection.cancel()
+                    continuation.resume(returning: false)
+                }
+            }
+        }
     }
 }

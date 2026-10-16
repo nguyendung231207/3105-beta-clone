@@ -230,9 +230,9 @@ public final class AirLiftPairingController: ObservableObject {
     private func advertiseBonjourService(serviceID: String, port: UInt16, txtRecord: [AnyHashable: Any]) {
         stopAdvertising()
         let service = NetService(
-            domain: "",
+            domain: "local.",
             type: "_remotepairing-pairable-host._tcp.",
-            name: serviceID,
+            name: hostName,
             port: Int32(port)
         )
 
@@ -245,8 +245,9 @@ public final class AirLiftPairingController: ObservableObject {
                 dict[keyStr] = d
             }
         }
-        let data = NetService.data(fromTXTRecord: dict)
-        service.setTXTRecord(data)
+        if let data = NetService.data(fromTXTRecord: dict) {
+            service.setTXTRecord(data)
+        }
         service.publish()
         self.netService = service
     }

@@ -68,7 +68,10 @@ static void pairable_host_ready_cb(void *ctx,
         if (txt_keys && txt_vals && txt_keys[i] && txt_vals[i]) {
             NSString *k = [NSString stringWithUTF8String:txt_keys[i]];
             NSString *v = [NSString stringWithUTF8String:txt_vals[i]];
-            dict[k] = v;
+            NSData *d = [v dataUsingEncoding:NSUTF8StringEncoding];
+            if (d) {
+                dict[k] = d;
+            }
         }
     }
     
@@ -111,7 +114,7 @@ static void pairable_host_pin_cb(const char *pin, void *ctx) {
         
         NSString *savedAltIRK = [[NSUserDefaults standardUserDefaults] stringForKey:@"aircardPairingHostAltIRK"] ?: @"";
         const char *altIrkC = savedAltIRK.length > 0 ? [savedAltIRK UTF8String] : "";
-        const char *nameC = (name && name.length > 0) ? [name UTF8String] : "PROXYDECK";
+        const char *nameC = (name && name.length > 0) ? [name UTF8String] : "3105";
         const char *modelC = (model && model.length > 0) ? [model UTF8String] : "Mac17,7";
         const char *outC = (outputPath && outputPath.length > 0) ? [outputPath UTF8String] : "airlift_pairing.plist";
         

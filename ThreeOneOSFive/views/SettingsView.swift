@@ -1,4 +1,6 @@
 import SwiftUI
+import Network
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
@@ -6,12 +8,35 @@ struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
     @AppStorage(AppLanguage.storageKey) private var languageCode = AppLanguage.english.rawValue
     @AppStorage(FeatureVisibility.cleanerStorageKey) private var cleanerEnabled = true
-    @AppStorage(FeatureVisibility.developerModeStorageKey)
-    private var developerModeEnabled = false
+    @AppStorage(FeatureVisibility.developerModeStorageKey) private var developerModeEnabled = false
+    @AppStorage("3105.airlift.use_airlift_all") private var useAirLiftAll = false
+
+    @StateObject private var airLiftPairing = AirLiftPairingController.shared
+    @State private var isImportingPairing = false
+    @State private var isTestingConnection = false
+    @State private var isTunnelConnected = false
+    @State private var activeAlert: SettingsAlertItem?
+
+    private enum SettingsAlertItem: Identifiable {
+        case testSuccess
+        case testFailed
+        case removePairingConfirm
+        case message(String)
+
+        var id: String {
+            switch self {
+            case .testSuccess: return "testSuccess"
+            case .testFailed: return "testFailed"
+            case .removePairingConfirm: return "removePairingConfirm"
+            case .message(let msg): return "msg_\(msg)"
+            }
+        }
+    }
 
     var body: some View {
         NavigationStack {
             Form {
+                // Section 1: Logo & App Info
                 Section {
                     HStack(spacing: 14) {
                         AppLogo()
@@ -26,6 +51,7 @@ struct SettingsView: View {
                     .padding(.vertical, 4)
                 }
 
+                // Section 2: Language
                 Section(language.text("settings.language")) {
                     Picker(language.text("settings.language"), selection: $languageCode) {
                         ForEach(AppLanguage.allCases) { option in
@@ -36,6 +62,7 @@ struct SettingsView: View {
                     .labelsHidden()
                 }
 
+                // Section 3: Features
                 Section {
                     Toggle(isOn: $cleanerEnabled) {
                         Label(language.text("tab.cleaner"), systemImage: "sparkles")
@@ -52,6 +79,7 @@ struct SettingsView: View {
                     Text(language.text("settings.developer_mode_footer"))
                 }
 
+                // Section 4: Wallpaper Reset (if supported)
                 if WallpaperFeatureSupportPolicy.isSupported(
                     major: AppInfo.versionTuple.major
                 ) {
@@ -71,37 +99,163 @@ struct SettingsView: View {
                     }
                 }
 
-                if ExploitSupportPolicy.isAirLiftRequired(major: AppInfo.versionTuple.major, minor: AppInfo.versionTuple.minor, patch: AppInfo.versionTuple.patch, build: AppInfo.osBuild) || appState.currentRoute == .airLift {
-                    Section {
-                        NavigationLink {
-                            AirLiftFirstRunSetupView()
-                        } label: {
-                            Label("Thiết lập AirLift (iOS 27+)", systemImage: "network")
+                // Section 5: AirLift Connection & On-Device Pairing
+                Section {
+                    // Status Rows
+                    connectionStatusRow(
+                        titleKey: "public_settings.tunnel",
+                        valueKey: isTunnelConnected ? "public_settings.connected" : "public_settings.disconnected",
+                        ready: isTunnelConnected
+                    )
+
+                    connectionStatusRow(
+                        titleKey: "public_settings.pairing",
+                        valueKey: AirLiftPairingStore.shared.hasRecord ? "airlift.ready" : "airlift.not_configured",
+                        ready: AirLiftPairingStore.shared.hasRecord
+                    )
+
+                    // On-Device Pairing Button & PIN Presentation
+                    if airLiftPairing.isRunning {
+                        VStack(spacing: 12) {
+                            HStack {
+                                ProgressView()
+                                    .padding(.trailing, 6)
+                                Text(airLiftPairing.pairingStatus)
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+
+                            if let pin = airLiftPairing.pairingPIN {
+                                VStack(spacing: 6) {
+                                    Text(language.text("airlift.pin"))
+                                        .font(.caption.bold())
+                                        .foregroundColor(.secondary)
+                                    Text(pin)
+                                        .font(.system(size: 38, weight: .bold, design: .monospaced))
+                                        .foregroundColor(.blue)
+                                    Text(language.text("public_settings.pairing_guide"))
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                        .multilineTextAlignment(.center)
+                                        .padding(.horizontal)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(Color(UIColor.secondarySystemBackground))
+                                .cornerRadius(12)
+                            }
+
+                            Button(action: {
+                                airLiftPairing.cancelPairing()
+                            }) {
+                                HStack {
+                                    Image(systemName: "xmark.circle")
+                                    Text(language.text("airlift.cancel_pairing"))
+                                }
+                                .foregroundColor(.red)
+                            }
+                            .buttonStyle(.bordered)
                         }
+                    } else {
+                        Button(action: {
+                            airLiftPairing.startOnDevicePairing()
+                        }) {
+                            HStack {
+                                Image(systemName: "iphone.badge.play")
+                                Text(language.text("airlift.pair_on_device"))
+                                    .fontWeight(.semibold)
+                            }
+                            .foregroundColor(.blue)
+                        }
+                    }
+
+                    // Import and Remove pairing
+                    Button(action: {
+                        isImportingPairing = true
+                    }) {
                         HStack {
-                            Text("Trạng thái AirLift")
-                            Spacer()
-                            Text(AirLiftPairingStore.shared.hasRecord ? "Đã ghép đôi" : "Chưa ghép đôi")
-                                .foregroundStyle(AirLiftPairingStore.shared.hasRecord ? Color.green : Color.orange)
+                            Image(systemName: "square.and.arrow.down")
+                            Text(language.text("airlift.import"))
                         }
-                    } header: {
-                        Text("AirLift Subsystem")
-                    } footer: {
-                        Text("Bản iOS này dùng AirLift. Trên iOS 27 có thể pair trực tiếp; hoặc nhập file pairing từ máy tính, rồi kiểm tra kết nối trước khi áp dụng patch.")
+                    }
+
+                    if AirLiftPairingStore.shared.hasRecord {
+                        Button(role: .destructive, action: {
+                            activeAlert = .removePairingConfirm
+                        }) {
+                            HStack {
+                                Image(systemName: "trash")
+                                Text(language.text("airlift.remove"))
+                            }
+                        }
+                    }
+
+                    // Test AirLift Connection
+                    Button(action: testAirLiftConnection) {
+                        HStack {
+                            if isTestingConnection {
+                                ProgressView()
+                                    .padding(.trailing, 6)
+                            } else {
+                                Image(systemName: "checkmark.shield")
+                            }
+                            Text(language.text("airlift.test_connection"))
+                        }
+                    }
+                    .disabled(isTestingConnection)
+
+                    // Navigation to full Diagnostics
+                    NavigationLink {
+                        AirLiftDiagnosticsView()
+                    } label: {
+                        Label(language.text("airlift.diagnostics.title"), systemImage: "stethoscope")
+                    }
+
+                    // Navigation to Setup Guide
+                    NavigationLink {
+                        AirLiftFirstRunSetupView()
+                    } label: {
+                        Label(language.text("airlift.first_run.connection_title"), systemImage: "network")
+                    }
+
+                    // Global AirLift Override Toggle
+                    Toggle(isOn: $useAirLiftAll) {
+                        Text(language.text("public_settings.use_airlift_all"))
+                    }
+                    .onChange(of: useAirLiftAll) { val in
+                        appState.detectSupport()
+                    }
+                } header: {
+                    Text(language.text("public_settings.connection"))
+                } footer: {
+                    Text(language.text("public_settings.pairing_footer"))
+                }
+
+                // Section 6: Dialer / Passcode Capture
+                Section(language.text("public_settings.capture_dialer_passcode")) {
+                    HStack {
+                        Image(systemName: "phone.badge.waveform.fill")
+                            .foregroundColor(AppTheme.accent)
+                        Text(language.text("public_settings.capture_dialer_passcode"))
+                        Spacer()
                     }
                 }
 
+                // Section 7: Device Information
                 Section(language.text("common.device")) {
                     LabeledContent(language.text("dashboard.hardware_model"), value: AppInfo.displayMachineName)
                     LabeledContent(language.text("settings.ios_version"), value: "\(AppInfo.osVersion) (\(AppInfo.osBuild))")
                 }
 
+                // Section 8: Supported Versions
                 Section {
                     HStack {
                         Text(language.text("settings.current_version"))
                         Spacer()
                         Text(language.text(appState.isSupported ? "settings.supported" : "settings.unsupported"))
-                        .foregroundStyle(appState.isSupported ? Color.green : Color.red)
+                            .foregroundStyle(appState.isSupported ? Color.green : Color.red)
                     }
                     LabeledContent("iOS 17", value: ExploitSupportPolicy.verifiedIOS17Range)
                     LabeledContent("iOS 18", value: ExploitSupportPolicy.verifiedIOS18Range)
@@ -111,8 +265,8 @@ struct SettingsView: View {
                             .font(.body)
                         ForEach(ExploitSupportPolicy.verifiedIOS27Builds, id: \.build) { version in
                             Text(versionLabel(version))
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
                         }
                     }
                     .padding(.vertical, 2)
@@ -122,6 +276,7 @@ struct SettingsView: View {
                     Text(language.text("settings.supported_versions_footer"))
                 }
 
+                // Section 9: Social Media & Credits
                 Section(language.text("settings.social_media")) {
                     creditsRow(
                         name: "GitHub",
@@ -172,13 +327,155 @@ struct SettingsView: View {
                         .fontWeight(.semibold)
                 }
             }
+            .fileImporter(
+                isPresented: $isImportingPairing,
+                allowedContentTypes: [.item],
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    if let url = urls.first {
+                        let ok = airLiftPairing.importPairingFile(from: url)
+                        if ok {
+                            activeAlert = .message(language.text("airlift.import_success_message"))
+                        } else {
+                            activeAlert = .message(airLiftPairing.lastError ?? "Import failed")
+                        }
+                    }
+                case .failure(let err):
+                    activeAlert = .message(err.localizedDescription)
+                }
+            }
+            .alert(item: $activeAlert) { item in
+                switch item {
+                case .testSuccess:
+                    return Alert(
+                        title: Text(language.text("airlift.test_success_title")),
+                        message: Text(language.text("airlift.test_success_message")),
+                        dismissButton: .default(Text("OK"))
+                    )
+                case .testFailed:
+                    return Alert(
+                        title: Text(language.text("airlift.test_failed_title")),
+                        message: Text("Không thể kết nối cổng RSD (49152) qua 10.7.0.1. Vui lòng bật LocalDevVPN và đảm bảo có Wi-Fi."),
+                        dismissButton: .default(Text("OK"))
+                    )
+                case .removePairingConfirm:
+                    return Alert(
+                        title: Text(language.text("airlift.remove")),
+                        message: Text("Bạn có chắc chắn muốn xoá file pairing AirLift?"),
+                        primaryButton: .destructive(Text(language.text("common.delete"))) {
+                            try? AirLiftPairingStore.shared.removeRecord()
+                        },
+                        secondaryButton: .cancel(Text(language.text("common.cancel")))
+                    )
+                case .message(let text):
+                    return Alert(
+                        title: Text("AirLift"),
+                        message: Text(text),
+                        dismissButton: .default(Text("OK"))
+                    )
+                }
+            }
+            .onAppear {
+                probeTunnel()
+            }
+        }
+    }
+
+    private func connectionStatusRow(titleKey: String, valueKey: String, ready: Bool) -> some View {
+        HStack {
+            Text(language.text(titleKey))
+            Spacer()
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(ready ? Color.green : Color.secondary.opacity(0.5))
+                    .frame(width: 8, height: 8)
+                Text(language.text(valueKey))
+                    .foregroundColor(ready ? .green : .secondary)
+            }
+        }
+    }
+
+    private func probeTunnel() {
+        Task {
+            let endpoint = NWEndpoint.hostPort(host: "10.7.0.1", port: 49152)
+            let conn = NWConnection(to: endpoint, using: .tcp)
+            var done = false
+            conn.stateUpdateHandler = { st in
+                guard !done else { return }
+                if case .ready = st {
+                    done = true
+                    conn.cancel()
+                    Task { @MainActor in
+                        self.isTunnelConnected = true
+                    }
+                } else if case .failed = st {
+                    done = true
+                    conn.cancel()
+                    Task { @MainActor in
+                        self.isTunnelConnected = false
+                    }
+                }
+            }
+            conn.start(queue: .global())
+            DispatchQueue.global().asyncAfter(deadline: .now() + 2.0) {
+                if !done {
+                    done = true
+                    conn.cancel()
+                    Task { @MainActor in
+                        self.isTunnelConnected = false
+                    }
+                }
+            }
+        }
+    }
+
+    private func testAirLiftConnection() {
+        isTestingConnection = true
+        Task {
+            let endpoint = NWEndpoint.hostPort(host: "10.7.0.1", port: 49152)
+            let conn = NWConnection(to: endpoint, using: .tcp)
+            var done = false
+            conn.stateUpdateHandler = { st in
+                guard !done else { return }
+                if case .ready = st {
+                    done = true
+                    conn.cancel()
+                    Task { @MainActor in
+                        self.isTestingConnection = false
+                        self.isTunnelConnected = true
+                        self.activeAlert = .testSuccess
+                    }
+                } else if case .failed = st {
+                    done = true
+                    conn.cancel()
+                    Task { @MainActor in
+                        self.isTestingConnection = false
+                        self.isTunnelConnected = false
+                        self.activeAlert = .testFailed
+                    }
+                }
+            }
+            conn.start(queue: .global())
+            DispatchQueue.global().asyncAfter(deadline: .now() + 3.0) {
+                if !done {
+                    done = true
+                    conn.cancel()
+                    Task { @MainActor in
+                        self.isTestingConnection = false
+                        self.isTunnelConnected = false
+                        self.activeAlert = .testFailed
+                    }
+                }
+            }
         }
     }
 
     private var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "AppReleaseDisplayVersion") as? String
             ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
-            ?? "1.0"
+            ?? "2.1 Beta 2 Offline v2"
     }
 
     private func versionLabel(

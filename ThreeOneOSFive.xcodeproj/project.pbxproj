@@ -11,6 +11,7 @@
 		3105AB02 /* AirLiftPairingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3105AL02; };
 		3105AB03 /* AirLiftFirstRunSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3105AL03; };
 		3105AB04 /* AirLiftPairingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3105AL04; };
+		3105AB11 /* AirLiftDiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3105AL11; };
 		3105AB05 /* ATCGlue.m in Sources */ = {isa = PBXBuildFile; fileRef = 3105AL05; };
 		3105AB06 /* PairingGlue.m in Sources */ = {isa = PBXBuildFile; fileRef = 3105AL06; };
 		3105FF02 /* AirliftFFI.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3105FF01; };
@@ -204,6 +205,7 @@
 				3105AL02 /* AirLiftPairingController.swift */,
 				3105AL03 /* AirLiftFirstRunSetupView.swift */,
 				3105AL04 /* AirLiftPairingStore.swift */,
+				3105AL11 /* AirLiftDiagnosticsView.swift */,
 				3105AL05 /* ATCGlue.m */,
 				3105AL06 /* PairingGlue.m */,
 				3105AL07 /* objc_headers */,
