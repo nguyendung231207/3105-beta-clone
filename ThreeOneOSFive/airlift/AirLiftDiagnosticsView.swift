@@ -128,7 +128,7 @@ public struct AirLiftDiagnosticsView: View {
                 Text(language.text("airlift.diagnostics.safety_footer"))
             }
 
-            Section(language.text("airlift.diagnostics.wallet_card_id")) {
+            Section {
                 TextField("Card ID", text: $walletCardID)
                     .autocorrectionDisabled(true)
                     .textInputAutocapitalization(.never)
@@ -143,14 +143,18 @@ public struct AirLiftDiagnosticsView: View {
                         Label(language.text("airlift.diagnostics.wallet_scan_start"), systemImage: "wave.3.forward.circle")
                     }
                 }
+            } header: {
+                Text(language.text("airlift.diagnostics.wallet_card_id"))
             } footer: {
                 Text(language.text("airlift.diagnostics.wallet_card_hint"))
             }
 
-            Section(language.text("airlift.diagnostics.results")) {
+            Section {
                 ForEach(AirLiftDiagnosticFeature.allCases) { feature in
                     diagnosticRow(for: feature)
                 }
+            } header: {
+                Text(language.text("airlift.diagnostics.results"))
             }
 
             Section {
