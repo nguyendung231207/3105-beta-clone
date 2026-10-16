@@ -25,18 +25,5 @@ NS_ASSUME_NONNULL_BEGIN
 
 @end
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-BOOL MCMBridgeAvailable(void);
-NSArray<NSString *> *MCMEnumerateIdentifiersForClass(uint64_t containerClass);
-NSString *MCMSafeIdentifier(NSString *identifier);
-BOOL MCMActivateContainerPath(NSString *path);
-BOOL MCMActivateContainer(uint64_t containerClass, NSString *identifier);
-
-#ifdef __cplusplus
-}
-#endif
-
 NS_ASSUME_NONNULL_END
+
