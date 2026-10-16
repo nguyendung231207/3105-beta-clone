@@ -75,14 +75,12 @@ public enum AirLiftTransport {
 
     private static func readOneLocked(path: String, pairingPath: String) throws -> Data {
         do {
-            guard let data = try ATCGlue.readFileArbitrary(
+            let data = try ATCGlue.readFileArbitrary(
                 withDeviceIP: defaultDeviceIP,
                 pairingPath: pairingPath,
                 absolutePath: path,
                 maximumBytes: 100 * 1024 * 1024
-            ) else {
-                throw AirLiftTransportError.fileNotFound(path)
-            }
+            )
             return data
         } catch {
             throw AirLiftTransportError.fileNotFound(error.localizedDescription)
@@ -99,13 +97,11 @@ public enum AirLiftTransport {
         }
 
         do {
-            guard let items = try ATCGlue.listDirectoryArbitrary(
+            let items = try ATCGlue.listDirectoryArbitrary(
                 withDeviceIP: defaultDeviceIP,
                 pairingPath: pairingPath,
                 absolutePath: reference.path
-            ) else {
-                throw AirLiftTransportError.afcError("Failed to list directory")
-            }
+            )
 
             return items.map { name in
                 AirLiftDirectoryEntry(
@@ -130,9 +126,7 @@ public enum AirLiftTransport {
         }
 
         do {
-            guard let dict = try ATCGlue.application(withBundleID: bundleID, deviceIP: defaultDeviceIP, pairingPath: pairingPath) else {
-                throw AirLiftTransportError.fileNotFound("App with bundle ID \(bundleID) not found")
-            }
+            let dict = try ATCGlue.application(withBundleID: bundleID, deviceIP: defaultDeviceIP, pairingPath: pairingPath)
 
             return AirLiftApplicationRecord(
                 bundleID: bundleID,
